@@ -9,7 +9,7 @@ This repository contains the analysis done for Menares et al. (2025), which adap
 > check that the datasets are named the same as in the data reading steps in the scripts so you can run the analyses with no problem.
 > The optimization results were obtained using a C# implementation of the heuristic greedy algorithm in Visual Studio 2019 and a MySQL database tailored to the project's datasets. While the optimization method is transferable, the implementation is tailored to the project. The C# code can be obtained by request from the authors.
 
-- The Quarto document [scores_exploration.qmd](scores_exploration.qmd) explores and selects the scores used the optimisations. 
+- The Quarto document scores_exploration.qmd explores and selects the scores used the optimisations. 
 - The scripts analysis_economic_opti_sch.R and analysis_economic_opti_alb.R generate the large bulk of graphs and tables
 - The script analysis_economic_fig5_SCH_ALB.R genarates Fig. 5
 - The script analysis_economic_figA11_SCH_ALB.R genarates the figure in appendix A11

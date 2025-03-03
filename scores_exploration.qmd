@@ -1,0 +1,3048 @@
+---
+title: "TrophCost Project: Exploration of Conservation Scores for Economic and Ecological Modelling"
+date: 2023-06-28
+author:
+  - name: Esteban Menares
+    orcid: 0000-0002-3731-3452
+    email: esteban.menares@b-tu.de
+    affiliation:
+      - name: Brandenburg University of Technology Cottbus-Senftenberg
+        department: Department of Ecology
+        address: Konrad-Wachsmann-Allee 6
+        postal-code: 03046
+        city: Cottbus
+        country: Germany
+format:
+  html: 
+    toc: true
+    toc-expand: true
+    number-sections: true
+    toc-depth: 3
+    embed-resources: true # render Quarto document into self contained HTML
+execute:
+  echo: false
+  warning: false
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+---
+
+Set up
+
+```{r}
+#| message: FALSE
+#| echo: true
+
+library(tidyverse)
+library(ggpubr) # publication-ready formatting for ggplots
+library(corrplot) # for making nice correlation visualizations/plots
+library(kableExtra) # for extra table formatting
+library(gghighlight) # for highlighting ggplots
+
+# solve packages conflicts
+conflicted::conflicts_prefer(dplyr::select)
+conflicted::conflicts_prefer(dplyr::filter)
+
+# set theme for all plots
+theme_set(theme_pubr(10))
+
+# my collection of functions
+source('scripts/source_script.R')
+
+
+# Read in data
+
+# scores_sp: species list per region with their respective conservation scores
+
+scores_sp <- 
+  read_csv('data/raw/scores_sp.csv') %>% 
+  rename_with(., tolower, everything())
+
+# scores_site: conservation scores of species summed up  per site
+
+scores_site <- 
+  read_csv('data/raw/scores_site.csv') %>% 
+  rename_with(., tolower, everything()) 
+  
+# sites: table with all environmental and land use variables
+
+sites <- read_csv('data/raw/sites.csv') %>% 
+  rename_with(tolower, everything())
+```
+
+This document explores and describes the calculation of scores for the design of scenarios for the conservation of butterflies (Lepidoptera: Rhopalocera) and plants in permanent grasslands in 89 sites in two regions in Germany. Region ALB in Baden-Württemberg (south-west) and region SCH in Brandenburg (north-east).
+
+To calculate all scores per community (per site), we used two different matrices. First, we gathered extensive data to build a "Scores per Species" matrix per region and taxa, which includes information for different scores for **each species** including:
+
+1\) Red list status: yes or no. Each species is represented by a Boolean variable based on the different threat categories of the regional red lists each taxa [@breunig1999; @gelbrecht2001; @ristow2006; @ebert2008]. It considers any species between "Near Threatened" and "Threatened with Extinction" as 1, "Not Threatened" as 0, and "Data deficient" as NA.
+
+2\) Threat category: Threatened with Extinction ('Vom Aussterben bedroht') Highly Threatened ('Stark gefährdet') Threatened ('Gefährdet') Threat of Unknown Extent ('Gefährdung unbekannten Ausmaßes') Extremely Rare ('Extrem selten') Near Threatened ('Vorwarnliste') Not Threatened ('Ungefährdet') Data Deficient ('Daten unzureichend').
+
+3\) Regional distribution: percentage relative to the total regional area. The regional distribution range represents the occupancy per species of the total regional area in %. It is calculated as the percentage of topographic map grid cells (MTB - TK25) occupied by each species in each region reported in <https://schmetterlinge-brandenburg-berlin.de/> (butterflies SCH, observations from 2001 on), <https://www.schmetterlinge-bw.de/> (butterflies ALB, observations from 2001 on), and <https://www.floraweb.de/> (plants SCH and ALB). For plants, data were directly provided by FloraWeb. For butterflies, only for region SCH we were able to retrieve data directly from the website under internal agreement. Therefore, we developed a method to extract pixel data from images using ImageJ, an open-source image analysis software (@schneider2012, <https://imagej.net/ij/>) and convert them to occupancy values for ALB. The data of SCH was used to check our results and the accuracy of our method. For a full description of the process see @fig-process-reg-dist.
+
+![Process workflow for calculating the regional distribution using ImageJ and online species observation portals.](output/calculation_reg_dist_score.jpg){#fig-process-reg-dist}
+
+4\) Low regional distribution: yes or no, having regional distribution ≤ 33%.
+
+5\) Number of trophic interactions. Trophic interactions between plants and Lepidoptera were extracted from the literature for each region individually from @ebert2005 for ALB and @richert2018 for SCH. We then filtered for species with occurrences in the respective region and then calculated the number of trophic interactions for each plant and butterfly separately. Trophic interactions were coded according to their intensity from 0 to 1. We considered any trophic interaction higher than zero.
+
+6\) Number of unique trophic interactions. Boolean variable indicating if the species has a unique interaction or not (i.e. a plant interacting with one species of butterfly only, or a butterfly interacting with one species of plant only).
+
+7\) Number of co-occurrences: only significant positive co-occurrences obtained using the pairwise approach and the Probabilistic method [@veech2013a; @veech2014a] with a cutoff of p_gt ≤ 0.2.
+
+8\) Potential number of pollinated crops: Lepidoptera only, adjusted to the regional commercial crop pool. Information on which commercial crops are cultivated per region were extracted from <https://www.statistik-berlin-brandenburg.de/land-und-forstwirtschaft> for Berlin and Brandenburg, and <https://www.statistik-bw.de/Landwirtschaft/Bodennutzung/> for Baden-Württemberg. To find out which of these crops are pollinated by which butterfly species, we compare the regional crop lists with the truncated data for Lepidoptera used to generate the crop-flower visitor network Fig. 1 of @rader2020
+
+9\) Crop pest: Lepidoptera only: yes or no. Data on which lepidoptera are considered pests of commercial crops were collected from different sources including [@edde2022; @ahdb2023; @eppo2023; @ukbms2023]. This score represents the negative effect of the Larva of butterflies present on each community, therefore it does not represent the direct effect of adult butterflies detected on the field. Given that butterflies can disperse large distances, this score should be taken with consideration.
+
+# Scores per species
+
+## Red list species and their threat-level
+
+First we will summarize the number of red list species per region and taxa.
+
+```{r}
+#| label: tbl-sp-summary-red-list
+#| tbl-cap: "Sum of red list species per region and taxa"
+
+scores_sp %>% 
+  summarise(
+    `total species` = n_distinct(species_id),
+    `total red list` = sum(red_list_bool > 0, na.rm = TRUE), 
+    `proportion` = round(`total red list` / `total species`, digits = 2),
+    .by = c(region, taxa)) %>% 
+  # Send to 'kable' for formatting as a table
+  kable(booktabs = TRUE) %>% 
+  kable_styling(font_size = 12)
+```
+
+Then, we plot the all species per region and taxa to vizualise their threat-level.
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=6}
+#| label: fig-sp-threat-lepi-alb
+#| fig-cap: "Red list threat-category per Lepidoptera species at region ALB"
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(red_list)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = red_list)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Red list threat-category"
+  ) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.17, 0.33, 0.50, 0.67, 0.83, 1))
+```
+
+**Plants - ALB**
+
+```{r, fig.height=11}
+#| label: fig-sp-threat-plant-alb
+#| fig-cap: "Red list threat-category per plant species at region ALB"
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "plant") %>%
+  drop_na(red_list) %>% 
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(red_list)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = red_list)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 5),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Red list threat-category"
+  ) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.17, 0.33, 0.50, 0.67, 0.83, 1))
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-threat-lepi-sch
+#| fig-cap: "Red list threat-category per Lepidoptera species at region SCH"
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(red_list)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = red_list)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Red list threat-category"
+  ) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.17, 0.33, 0.50, 0.67, 0.83, 1))
+```
+
+**Plants - SCH**
+
+```{r, fig.height=7}
+#| label: fig-sp-threat-plant-sch
+#| fig-cap: "Red list threat-category per plant species at region SCH"
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "plant") %>%
+  drop_na(red_list) %>% 
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(red_list)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = red_list)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Red list threat-category"
+  ) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.17, 0.33, 0.50, 0.67, 0.83, 1))
+```
+
+## Regional distribution range
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=6}
+#| label: fig-sp-reg-dist-lepi-alb
+#| fig-cap: "Regional distribution per Lepidoptera species at region ALB"
+
+scores_sp %>% 
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(reg_dist, .na_rm = TRUE)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = reg_dist)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Regional distribution range (% occupancy of total regional area)"
+  ) 
+```
+
+**Plants - ALB**
+
+```{r, fig.height=11}
+#| label: fig-sp-reg-dist-plant-alb
+#| fig-cap: "Regional distribution per plant species at region ALB"
+
+scores_sp %>% 
+  filter(region == "ALB" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(reg_dist, .na_rm = TRUE)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = reg_dist)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 6),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Regional distribution range (% occupancy of total regional area)"
+  ) 
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-reg-dist-lepi-sch
+#| fig-cap: "Regional distribution per Lepidoptera species at region SCH"
+
+scores_sp %>% 
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(reg_dist, .na_rm = TRUE)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = reg_dist)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef')) +
+  labs(
+    x = "Species name",
+    y = "Regional distribution range (% occupancy of total regional area)"
+  ) 
+```
+
+**Plants - SCH**
+
+```{r, fig.height=7}
+#| label: fig-sp-reg-dist-plant-sch
+#| fig-cap: "Regional distribution per plant species at region SCH"
+
+scores_sp %>% 
+  filter(region == "SCH" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(reg_dist, .na_rm = TRUE)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = reg_dist)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  labs(
+    x = "Species name",
+    y = "Regional distribution range (% occupancy of total regional area)"
+  ) 
+```
+
+## Low regional distribution range
+
+```{r}
+#| label: tbl-sp-summary-low-reg-dist
+#| tbl-cap: "Sum of species with regional distribution < 33% per region and taxa"
+
+scores_sp %>% 
+  summarise(
+    `total species` = n_distinct(species_id),
+    `total low reg dist` = sum(low_reg_dist > 0, na.rm = TRUE), 
+    `proportion` = round(`total low reg dist`/`total species`, digits = 2),
+    .by = c(region, taxa)) %>% 
+  # Send to 'kable' for formatting as a table
+  kable(booktabs = TRUE) %>% 
+  kable_styling(font_size = 12)
+```
+
+## Trophic interactions
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=7}
+#| label: fig-sp-troph-int-lepi-alb
+#| fig-cap: "Sum of trophic interactions per Lepidoptera species at region ALB. Solid dots represents trophic interactions filtered only for species occurring at each site. Open dots represents all potential interactions from literature at the region, filtered for any of the sampled species in the study, and excluding interactions with trees, bushes, non-flowering plants and lower-taxonomic categories (e.g. genus-level interactions)."
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int,
+                 color = "only occurrent species per site")) +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int_lit, 
+                 color = "potential interactions from literature"),
+             shape = 1) +
+  scale_color_manual(
+    name = "",
+    values = c("only occurrent species per site" = "black",
+               "potential interactions from literature" = "chocolate")) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  labs(
+    x = "Species name",
+    y = "Sum of trophic interactions"
+  ) 
+```
+
+**Plants - ALB**
+
+```{r, fig.height=11}
+#| label: fig-sp-troph-int-plant-alb
+#| fig-cap: "Sum of trophic interactions per plant species at region ALB. Solid dots represents trophic interactions filtered only for species occurring at each site. Open dots represents all potential interactions from literature at the region, filtered for any of the sampled species in the study, and excluding interactions with trees, bushes, non-flowering plants and lower-taxonomic categories (e.g. genus-level interactions)."
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int,
+                 color = "only occurrent species per site")) +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int_lit, 
+                 color = "potential interactions from literature"),
+             shape = 1) +
+  scale_color_manual(
+    name = "",
+    values = c("only occurrent species per site" = "black",
+               "potential interactions from literature" = "chocolate")) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 6),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  labs(
+    x = "Species name",
+    y = "Sum of trophic interactions"
+  ) 
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-troph-int-lepi-sch
+#| fig-cap: "Sum of trophic interactions per Lepidoptera species at region SCH. Solid dots represents trophic interactions filtered only for species occurring at each site. Open dots represents all potential interactions from literature at the region, filtered for any of the sampled species in the study, and excluding interactions with trees, bushes, non-flowering plants and lower-taxonomic categories (e.g. genus-level interactions)."
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int,
+                 color = "only occurrent species per site")) +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int_lit, 
+                 color = "potential interactions from literature"),
+             shape = 1) +
+  scale_color_manual(
+    name = "",
+    values = c("only occurrent species per site" = "black",
+               "potential interactions from literature" = "chocolate")) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  labs(
+    x = "Species name",
+    y = "Sum of trophic interactions"
+  ) 
+```
+
+**Plants - SCH**
+
+```{r, fig.height=7}
+#| label: fig-sp-troph-int-plant-sch
+#| fig-cap: "Sum of trophic interactions per plant species at region SCH. Solid dots represents trophic interactions filtered only for species occurring at each site. Open dots represents all potential interactions from literature at the region, filtered for any of the sampled species in the study, and excluding interactions with trees, bushes, non-flowering plants and lower-taxonomic categories (e.g. genus-level interactions)."
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int,
+                 color = "only occurrent species per site")) +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int_lit, 
+                 color = "potential interactions from literature"),
+             shape = 1) +
+  scale_color_manual(
+    name = "",
+    values = c("only occurrent species per site" = "black",
+               "potential interactions from literature" = "chocolate")) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 6),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  labs(
+    x = "Species name",
+    y = "Sum of trophic interactions"
+  ) 
+```
+
+## Species with unique interactions
+
+```{r}
+#| label: tbl-sp-summary-unique-troph-int
+#| tbl-cap: "Sum of species with unique trophic interactions per region and taxa. Data of trophic interactions was filtered for species occurring at any site and does not represent the whole potential interactions described in the literature."
+
+scores_sp %>% 
+  summarise(
+    `total species` = n_distinct(species_id),
+    `total unique troph int` = sum(n_unique_int > 0, na.rm = TRUE), 
+    `proportion` = round(`total unique troph int`/`total species`, digits = 2),
+    .by = c(region, taxa)) %>% 
+  # Send to 'kable' for formatting as a table
+  kable(booktabs = TRUE) %>% 
+  kable_styling(font_size = 12)
+```
+
+## Co-occurrences
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=7}
+#| label: fig-sp-cooccur-lepi-alb
+#| fig-cap: "Sum of significant positive co-occurrences per Lepidoptera species at region ALB. Obtained using the pairwise approach and the Probabilistic method with a cutoff of p_gt ≤ 0.2."
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_cooccur)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = n_cooccur)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of co-occurrences"
+  ) 
+```
+
+**Plants - ALB**
+
+```{r, fig.height=11}
+#| label: fig-sp-cooccur-plants-alb
+#| fig-cap: "Sum of significant positive co-occurrences per plant species at region ALB. Obtained using the pairwise approach and the Probabilistic method with a cutoff of p_gt ≤ 0.2."
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_cooccur)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = n_cooccur)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 5),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of co-occurrences"
+  ) 
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-cooccur-lepi-sch
+#| fig-cap: "Sum of significant positive co-occurrences per Lepidoptera species at region SCH Obtained using the pairwise approach and the Probabilistic method with a cutoff of p_gt ≤ 0.2."
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_cooccur)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = n_cooccur)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'))  +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of co-occurrences"
+  ) 
+```
+
+**Plants - SCH**
+
+```{r, fig.height=7}
+#| label: fig-sp-cooccur-plants-sch
+#| fig-cap: "Sum of significant positive co-occurrences per plant species at region SCH Obtained using the pairwise approach and the Probabilistic method with a cutoff of p_gt ≤ 0.2."
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_cooccur)) %>% 
+  ggplot(
+    aes(x = species_name,
+        y = n_cooccur)) +
+  geom_point() +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef')) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of co-occurrences"
+  ) 
+```
+
+## Trophic interactions vs. co-occurrences
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=7}
+#| label: fig-sp-cooccur-vs-troph-int-alb
+#| fig-cap: "Trophic interactions vs co-occurences of per Lepidoptera species at region ALB"
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int, 
+                 col = "trophic interactions")) +
+  geom_point(aes(x = species_name, 
+                 y = n_cooccur, 
+                 color = "co-occurrences"), 
+             shape = 1) +
+  coord_flip() +
+  scale_color_manual(name = "",
+                     values = c("trophic interactions" = "black",
+                                "co-occurrences" = "chocolate")) +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of interactions and co-occurrences"
+  )
+```
+
+**Plants - ALB**
+
+```{r, fig.height=11}
+#| label: fig-sp-cooccur-vs-troph-int-plant-alb
+#| fig-cap: "Trophic interactions vs co-occurences of per plant species at region ALB"
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int, 
+                 col = "trophic interactions")) +
+  geom_point(aes(x = species_name, 
+                 y = n_cooccur, 
+                 color = "co-occurrences"), 
+             shape = 1) +
+  coord_flip() +
+  scale_color_manual(name = "",
+                     values = c("trophic interactions" = "black",
+                                "co-occurrences" = "chocolate")) +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 5),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of interactions and co-occurrences"
+  )
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-cooccur-vs-troph-int-sch
+#| fig-cap: "Trophic interactions vs co-occurences of per Lepidoptera species at region SCH"
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int, 
+                 col = "trophic interactions")) +
+  geom_point(aes(x = species_name, 
+                 y = n_cooccur, 
+                 color = "co-occurrences"), 
+             shape = 1) +
+  coord_flip() +
+  scale_color_manual(name = "",
+                     values = c("trophic interactions" = "black",
+                                "co-occurrences" = "chocolate")) +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of interactions and co-occurrences"
+  )
+```
+
+**Plants - SCH**
+
+```{r, fig.height=7}
+#| label: fig-sp-cooccur-vs-troph-int-plant-sch
+#| fig-cap: "Trophic interactions vs co-occurences of per plant species at region SCH"
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "plant") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_troph_int)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_troph_int, 
+                 col = "trophic interactions")) +
+  geom_point(aes(x = species_name, 
+                 y = n_cooccur, 
+                 color = "co-occurrences"), 
+             shape = 1) +
+  coord_flip() +
+  scale_color_manual(name = "",
+                     values = c("trophic interactions" = "black",
+                                "co-occurrences" = "chocolate")) +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of interactions and co-occurrences"
+  )
+```
+
+## Flowering crop pollination and crop pests
+
+**Lepidoptera - ALB**
+
+```{r, fig.height=7}
+#| label: fig-sp-crop-pollinators-and-pests-alb
+#| fig-cap: "Sum of flowering crops that a Lepidoptera species can potentially pollinate at region ALB. Species are marked in blue if their larvae are considered crop pests."
+
+# TODO: decide on a better tittle for the x-axis 
+
+scores_sp %>%
+  filter(region == "ALB" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_crops)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_crops), 
+             color = "chocolate") +
+  gghighlight(crop_pest == 1, 
+              use_direct_label = FALSE,
+              unhighlighted_params = list(colour = NULL)) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of potentially pollinated flowering crops from regional crop pool"
+  )
+```
+
+**Lepidoptera - SCH**
+
+```{r}
+#| label: fig-sp-crop-pollinators-and-pests-sch
+#| fig-cap: "Sum of flowering crops that a Lepidoptera species can potentially pollinate at region SCH Species are marked in blue if their larvae are considered crop pests."
+
+scores_sp %>%
+  filter(region == "SCH" & taxa == "lepidoptera") %>%
+  mutate(species_name = 
+           factor(species_name) %>% 
+           fct_reorder(n_crops)) %>% 
+  ggplot() +
+  geom_point(aes(x = species_name, 
+                 y = n_crops), 
+             color = "chocolate") +
+  gghighlight(crop_pest == 1, 
+              use_direct_label = FALSE,
+              unhighlighted_params = list(colour = NULL)) +
+  coord_flip() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        panel.grid.minor = element_line(linetype = "dashed"),
+        panel.grid.major = element_line(color = '#efefef'),
+        legend.position = "bottom",
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12)) +
+  scale_y_continuous(n.breaks = 6) +
+  labs(
+    x = "Species name",
+    y = "Sum of potentially pollinated flowering crops from regional crop pool"
+  )
+```
+
+# Scores per site
+
+Using a "Species per Community" matrix, which includes information on the abundance of each species per community (i.e. per site) for all plots in each region. We used both matrices to calculate three categories of scores:
+
+1) Presence/Absence (P/A): first abundance information was turned into Boolean variables to represent the presence/absence of each species, then multiplying the scores per species by 1 when the species is present in the community (i.e. site). This category represents scores which are not abundance-weighted and not scaled for multidiversity.
+
+2) Community Weighted Means (CWM): is computed, for each site (community), by multiplying the scores per species values by the species relative abundance and summing the resulting values (De Bello et al. 2021). Abundances were log+1 transformed to reduce the importance of very common species before calculating CWM following De Bello et al. (2021). For numeric scores, the final value per community represents the average value of that score in the community. For binary/categorical scores, the final value represents the proportion of that score in the community. In these scores, species with higher number of individuals get higher weight, hence contributing more to the final value of the score per site.
+
+3) Multidiversity (Multidiv): each score is scaled (or corrected) by the total number of species per taxa and region, hence reducing the influence of plants (group with higher number of species) on the final value of the scores per site and allowing for combination of score values from both taxa. When a score is calculated, taxa with generally higher species numbers (richness, in our case plants) will have more weight than a species poor taxon (in our case butterflies). Therefore, we need to standardize to be able to combine both taxa into one score. For each taxon, each score has a value from 0 to 1, hence the combined taxa score has a value from 0 to 2.
+
+## Comparing P/A vs. CWM vs. Multidiv scores
+
+Aim: to compare calculated scores between the three categories and explore if richness or abundance drives differences between the scores. Plot scores against species richness and abundances per taxa and region.
+
+To be able to compare abundances of plant and Lepidoptera, we need to scale/normalize both variables between 0 and 1 within each taxa and region. We do this by scaling by the max. This scaling is equivalent to min-max normalization when there are 0 values in the variable. We choose explicitly not to min-max normalize, to be able to differentiate between abundance/richness of a single taxa (values 0 - 1) and of both taxa combined (sum of both i.e values 0 - 2). We adjust the scales of the features to have a standard scale of measure. Min-max scaling is also useful if we don't know the distribution of our data and it doesn't necesarilly follow a Gaussian distribution. The smooth line is only for visual aid and does not represent a formal regression analysis.
+
+```{r}
+#| echo: false
+
+## ---- scale/normalize abundances and richness values to compare scores
+
+scores_site <-
+  scores_site %>% 
+  mutate(sAbund_lepi = abund_lepi/max(abund_lepi), 
+         sAbund_plant = abund_plant/max(abund_plant),
+         sN_lepi = n_lepi / max(n_lepi),
+         sN_plant = n_plant / max(n_plant),
+         .by = region) %>% 
+  mutate(sAbund_multidiv = sAbund_lepi + sAbund_plant) %>% 
+  relocate(c(sAbund_lepi, sAbund_plant, sAbund_multidiv), 
+           .after = abund_plant) %>% 
+  rename(sN_multidiv = n_spp_multidiv) %>% 
+  relocate(c(sN_lepi, sN_plant, sN_multidiv), .after = n_spp) 
+  
+```
+
+### Abundance vs. Richness
+
+```{r}
+#| label: fig-site-abund-vs-rich
+#| fig-cap: "Species abundance (max scaled) vs. species richness (max scaled). Values of both are constrained between 0 - 1 for each taxa, therefore the maximum possible value of either richness or abundance for a site is euqal to 2."
+
+## ---- abundance vs. richness - multidiv
+
+scores_site %>% 
+  ggplot() +
+  # abundance vs. richness - combined
+  geom_point(aes(x = sN_multidiv, y = sAbund_multidiv, 
+                 col = "combined"),
+             alpha = 0.5) + 
+  geom_smooth(method = lm, se = FALSE,
+              aes(x = sN_multidiv, y = sAbund_multidiv, 
+                  col = "combined")) +
+  # abundance vs. richness - plant
+  geom_point(aes(x = sN_plant, y = sAbund_plant, col = "plant"),
+             alpha = 0.5) +
+  geom_smooth(method = lm, se = FALSE,
+              aes(x = sN_plant, y = sAbund_plant, col = "plant")) +
+  # abundance vs. richness - lepi
+  geom_point(aes(x = sN_lepi, y = sAbund_lepi, col = "lepi"),
+             alpha = 0.5) +
+  geom_smooth(method = lm, se = FALSE,
+              aes(x = sN_lepi, y = sAbund_lepi, col = "lepi")) +
+  scale_color_manual(name = "", 
+                     values = c("combined" = "chocolate", 
+                                "plant" = "seagreen",
+                                "lepi" = "slateblue")) + 
+  coord_cartesian(xlim = c(0,2), ylim = c(0,2)) + 
+  facet_wrap(~region) +
+  theme(legend.position = "bottom") +
+  labs(x = "Species richness (max scaled)", 
+       y = "Species abundance (max scaled)")
+
+```
+
+**Species richness butterflies:**
+
+Total number (richness) of day active butterfly species per community (i.e. site). Data obtained from field observations between May and August 2008 in regions ALB and SCH including 3 surveys on all plots. Lepidoptera species (and their individual numbers) were counted within 2.5 m either side and 5 m in front of the scientists on transects of 300 m length within 30 min (BExIS dataset 12526_2; @börschig, @börschig2013). This is a traditional conservation goal to maximize butterfly species richness.
+
+**Species richness plants:**
+
+Total number (richness) of plant species in each community (i.e. site). Data obtained from field observations between May and June in 2008 in regions ALB and SCH. Plant species were sampled in an area of 4m x 4m and estimated the percentage (canopy) cover of each species relative to the whole 4 m x 4 m plot. (BExIS dataset 23586_2; @schäfer). We excluded those species identified only until family and genus level, unknown observations, tree, shrubs, and fern species. This is a traditional conservation goal to maximize plant species richness.
+
+**Species richness combined (multidiv):**
+
+Total number of species (richness) of both taxa combined and scaled for the maximum number of species per taxa per region. Each taxa ranges from 0 to 1 within the region, therefore the sum of both taxa within the region for each site ranges from 0 to 2.
+
+### Sum of red list species
+
+Total number of red list species present per site. It considers any species between "Near Threatened" and "Threatened with Extinction" as 1, "Not Threatened" as 0, and "Data deficient" as NA. Then, that value was multiplied by 1 if the species is present in the "Species per Community" matrix, or by zero if absent or adjusted for multidiversity (per region and taxa scaled). The final score in the "Scores per Community" matrix represents the sum. Another traditional conservation goal to promote rare species.
+
+```{r}
+#| include: FALSE
+p7 <- 
+  scores_site %>%
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(n_red_list_lepi_pa),
+                 col = "n_red_list_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(n_red_list_lepi_pa),
+                  col = "n_red_list_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(n_red_list_plant_pa),
+                 col = "n_red_list_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(n_red_list_plant_pa),
+                  col = "n_red_list_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(n_red_list_pa),
+                 col = "n_red_list_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(n_red_list_pa),
+                  col = "n_red_list_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(n_red_list_multidiv),
+                 col = "n_red_list_multidiv")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(n_red_list_multidiv),
+                  col = "n_red_list_multidiv"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(cwm_n_red_list_lepi),
+                 col = "cwm_n_red_list_lepi")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(cwm_n_red_list_lepi),
+                  col = "cwm_n_red_list_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(cwm_n_red_list_plant),
+                 col = "cwm_n_red_list_plant")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(cwm_n_red_list_plant),
+                  col = "cwm_n_red_list_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_red_list_lepi_pa" = "skyblue",
+                                "n_red_list_plant_pa" = "gold",
+                                "n_red_list_pa" = "chocolate",
+                                "n_red_list_multidiv" = "maroon",
+                                "cwm_n_red_list_lepi" = "slateblue",
+                                "cwm_n_red_list_plant" = "seagreen")) + 
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Red list scores (minmax norm)")
+
+p7
+```
+
+```{r}
+#| include: FALSE
+p8 <- 
+  scores_site %>%
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(n_red_list_lepi_pa),
+                 col = "n_red_list_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(n_red_list_lepi_pa),
+                  col = "n_red_list_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(n_red_list_plant_pa),
+                 col = "n_red_list_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(n_red_list_plant_pa),
+                  col = "n_red_list_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(n_red_list_pa),
+                 col = "n_red_list_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(n_red_list_pa),
+                  col = "n_red_list_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(n_red_list_multidiv),
+                 col = "n_red_list_multidiv")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(n_red_list_multidiv),
+                  col = "n_red_list_multidiv"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(cwm_n_red_list_lepi),
+                 col = "cwm_n_red_list_lepi")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(cwm_n_red_list_lepi),
+                  col = "cwm_n_red_list_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(cwm_n_red_list_plant),
+                 col = "cwm_n_red_list_plant")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(cwm_n_red_list_plant),
+                  col = "cwm_n_red_list_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_red_list_lepi_pa" = "skyblue",
+                                "n_red_list_plant_pa" = "gold",
+                                "n_red_list_pa" = "chocolate",
+                                "n_red_list_multidiv" = "maroon",
+                                "cwm_n_red_list_lepi" = "slateblue",
+                                "cwm_n_red_list_plant" = "seagreen")) + 
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Red list scores (minmax norm)")
+p8
+```
+
+```{r, fig.height=8}
+#| label: fig-site-red-list
+#| fig-cap: "Sum of red list species per taxa and site."
+ggarrange(p7, 
+          p8, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   since red list species are important no matter what abundance a specific species have, it is in anyway better to use the P/A score for each taxa.
+
+-   if we want to use a combined score for both taxa, we could use the multidiv-scaled score, because both (pa and multidiv) are highly correlated.
+
+-   ALB: with increasing multividersity, increased number of red list species and increasing relative proportion of red listed species in the communities.
+
+-   SCH: only communities with middle multidiversity have species that are red list.
+
+### Average of threat categories
+
+Average of the threat categories of species present per community.
+
+```{r}
+#| include: false
+p9 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(av_threat_lepi_pa),
+                 col = "av_threat_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(av_threat_lepi_pa),
+                  col = "av_threat_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(av_threat_plant_pa),
+                 col = "av_threat_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(av_threat_plant_pa),
+                  col = "av_threat_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(av_threat_pa),
+                 col = "av_threat_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(av_threat_pa),
+                  col = "av_threat_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(cwm_av_threat_lepi),
+                 col = "cwm_av_threat_lepi")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(cwm_av_threat_lepi),
+                  col = "cwm_av_threat_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(cwm_av_threat_plant),
+                 col = "cwm_av_threat_plant")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(cwm_av_threat_plant),
+                  col = "cwm_av_threat_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("av_threat_lepi_pa" = "skyblue",
+                                "av_threat_plant_pa" = "gold",
+                                "av_threat_pa" = "chocolate",
+                                "cwm_av_threat_lepi" = "slateblue",
+                                "cwm_av_threat_plant" = "seagreen")) + 
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Av. threath scores (minmax norm)")
+p9
+```
+
+```{r}
+#| include: false
+p10 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(av_threat_lepi_pa),
+                 col = "av_threat_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(av_threat_lepi_pa),
+                  col = "av_threat_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(av_threat_plant_pa),
+                 col = "av_threat_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(av_threat_plant_pa),
+                  col = "av_threat_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(av_threat_pa),
+                 col = "av_threat_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(av_threat_pa),
+                  col = "av_threat_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(cwm_av_threat_lepi),
+                 col = "cwm_av_threat_lepi")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(cwm_av_threat_lepi),
+                  col = "cwm_av_threat_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(cwm_av_threat_plant),
+                 col = "cwm_av_threat_plant")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(cwm_av_threat_plant),
+                  col = "cwm_av_threat_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("av_threat_lepi_pa" = "skyblue",
+                                "av_threat_plant_pa" = "gold",
+                                "av_threat_pa" = "chocolate",
+                                "cwm_av_threat_lepi" = "slateblue",
+                                "cwm_av_threat_plant" = "seagreen")) + 
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Av. threath scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-av-red-list-treath
+#| fig-cap: "Average treath category of red list species per taxa and site."
+ggarrange(p9, 
+          p10, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   ALB: in ALboth simple PA and CWM scores for Lepi show similar relationship against species richness and abundance, but for plants the relationship is less clear.
+
+-   In ALB it seems that the threat scores have a more linear relationship with abundance and richness, but in SCH the scores show a humpbacked curve in relationship to species richness and abundance.
+
+-   CWM and PA give a similar information in almost all cases, so the best option would be to choose the PA score because it is the simplest score.
+
+### Sum of threat categories
+
+Sum of the threat categories of species present per community.
+
+```{r}
+#| include: false
+
+p11 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(sum_threat_lepi_pa),
+                 col = "sum_threat_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(sum_threat_lepi_pa),
+                  col = "sum_threat_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(sum_threat_plant_pa),
+                 col = "sum_threat_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(sum_threat_plant_pa),
+                  col = "sum_threat_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(sum_threat_pa),
+                 col = "sum_threat_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(sum_threat_pa),
+                  col = "sum_threat_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(sum_threat_multidiv),
+                 col = "sum_threat_multidiv")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(sum_threat_multidiv),
+                  col = "sum_threat_multidiv"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_threat_lepi_pa" = "skyblue",
+                                "sum_threat_plant_pa" = "gold",
+                                "sum_threat_pa" = "chocolate",
+                                "sum_threat_multidiv" = "maroon")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Sum threath scores (minmax norm)")
+```
+
+```{r}
+#| include: false
+
+p12 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(sum_threat_lepi_pa),
+                 col = "sum_threat_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(sum_threat_lepi_pa),
+                  col = "sum_threat_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(sum_threat_plant_pa),
+                 col = "sum_threat_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(sum_threat_plant_pa),
+                  col = "sum_threat_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(sum_threat_pa),
+                 col = "sum_threat_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(sum_threat_pa),
+                  col = "sum_threat_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(sum_threat_multidiv),
+                 col = "sum_threat_multidiv")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(sum_threat_multidiv),
+                  col = "sum_threat_multidiv"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_threat_lepi_pa" = "skyblue",
+                                "sum_threat_plant_pa" = "gold",
+                                "sum_threat_pa" = "chocolate",
+                                "sum_threat_multidiv" = "maroon")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Sum threath scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-sum-red-list-treath
+#| fig-cap: "Sum of treath categories of red list species per taxa and site."
+ggarrange(p11, 
+          p12, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   Species richness does increase the sum of threat scores in ALB for each taxa per separate and both combined, but in SCH this increase is related only to plants.
+
+-   The dispersion around the mean values in SCH with increasing species richness means that a distribution which account for ovedispersion should be applied.
+
+-   The multidiv score does show a different pattern with both species richness and abundance, hence it might be better to use this score than simple PA when combining both taxa.
+
+-   The sum of threat score for plant species decreases with increasing species abundance in ALB but in SCH this relationship is absent.
+
+### Average distribution range
+
+Average of the regional distribution ranges of species present per community.
+
+```{r}
+#| include: false
+p13 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(av_reg_dist_lepi_pa),
+                 col = "av_reg_dist_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(av_reg_dist_lepi_pa),
+                  col = "av_reg_dist_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(av_reg_dist_plant_pa),
+                 col = "av_reg_dist_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(av_reg_dist_plant_pa),
+                  col = "av_reg_dist_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi,
+                 y = norm_minmax(cwm_av_reg_dist_lepi),
+                 col = "cwm_av_reg_dist_lepi")) +
+  geom_smooth(method = lm,
+              aes(x = sN_lepi,
+                  y = norm_minmax(cwm_av_reg_dist_lepi),
+                  col = "cwm_av_reg_dist_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant,
+                 y = norm_minmax(cwm_av_reg_dist_plant),
+                 col = "cwm_av_reg_dist_plant")) +
+  geom_smooth(method = lm,
+              aes(x = sN_plant,
+                  y = norm_minmax(cwm_av_reg_dist_plant),
+                  col = "cwm_av_reg_dist_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("av_reg_dist_lepi_pa" = "skyblue",
+                                "av_reg_dist_plant_pa" = "gold",
+                                "cwm_av_reg_dist_lepi" = "slateblue",
+                                "cwm_av_reg_dist_plant" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Av. reg. dist. scores (minmax norm)")
+```
+
+```{r}
+#| include: false
+
+
+p14 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(av_reg_dist_lepi_pa),
+                 col = "av_reg_dist_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(av_reg_dist_lepi_pa),
+                  col = "av_reg_dist_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(av_reg_dist_plant_pa),
+                 col = "av_reg_dist_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(av_reg_dist_plant_pa),
+                  col = "av_reg_dist_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi,
+                 y = norm_minmax(cwm_av_reg_dist_lepi),
+                 col = "cwm_av_reg_dist_lepi")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_lepi,
+                  y = norm_minmax(cwm_av_reg_dist_lepi),
+                  col = "cwm_av_reg_dist_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant,
+                 y = norm_minmax(cwm_av_reg_dist_plant),
+                 col = "cwm_av_reg_dist_plant")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_plant,
+                  y = norm_minmax(cwm_av_reg_dist_plant),
+                  col = "cwm_av_reg_dist_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("av_reg_dist_lepi_pa" = "skyblue",
+                                "av_reg_dist_plant_pa" = "gold",
+                                "cwm_av_reg_dist_lepi" = "slateblue",
+                                "cwm_av_reg_dist_plant" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Av. reg. dist. scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-av-reg-dist
+#| fig-cap: "Average regional distribution range species per taxa and site."
+ggarrange(p13, 
+          p14, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   In ALB the av. regional distribution of plants decreases with increasing species richness, but increases with increasing abundance.
+
+-   The av. reg. dist. of Lepidoptera decreases with increasing abundance and richness.
+
+-   In SCH, the score is not affected by abundance, but for plants, it decreases with increasing plant richness, meaning that communities with more species tend to have more species with narrower distribution range
+
+-   In both regions, CWM score does not give a different information than the simple PA score, therefore we could pick the simplest one.
+
+### Sum of species with small regional distribution range
+
+Sum of species present per community with a regional distribution range ≤ 33% of the total regional area.
+
+```{r}
+#| include: false
+
+p15 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(n_low_reg_dist_lepi_pa),
+                 col = "n_low_reg_dist_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(n_low_reg_dist_lepi_pa),
+                  col = "n_low_reg_dist_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant, 
+                 y = norm_minmax(n_low_reg_dist_plant_pa),
+                 col = "n_low_reg_dist_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_plant, 
+                  y = norm_minmax(n_low_reg_dist_plant_pa),
+                  col = "n_low_reg_dist_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(n_low_reg_dist_pa),
+                 col = "n_low_reg_dist_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(n_low_reg_dist_pa),
+                  col = "n_low_reg_dist_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(n_low_reg_dist_multidiv),
+                 col = "n_low_reg_dist_multidiv")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(n_low_reg_dist_multidiv),
+                  col = "n_low_reg_dist_multidiv"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi,
+                 y = norm_minmax(cwm_n_low_reg_dist_lepi),
+                 col = "cwm_n_low_reg_dist_lepi")) +
+  geom_smooth(method = lm,
+              aes(x = sN_lepi,
+                  y = norm_minmax(cwm_n_low_reg_dist_lepi),
+                  col = "cwm_n_low_reg_dist_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sN_plant,
+                 y = norm_minmax(cwm_n_low_reg_dist_plant),
+                 col = "cwm_n_low_reg_dist_plant")) +
+  geom_smooth(method = lm,
+              aes(x = sN_plant,
+                  y = norm_minmax(cwm_n_low_reg_dist_plant),
+                  col = "cwm_n_low_reg_dist_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_low_reg_dist_lepi_pa" = "skyblue",
+                                "n_low_reg_dist_plant_pa" = "gold",
+                                "n_low_reg_dist_pa" = "chocolate",
+                                "n_low_reg_dist_multidiv" = "maroon",
+                                "cwm_n_low_reg_dist_lepi" = "slateblue",
+                                "cwm_n_low_reg_dist_plant" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "n low reg. dist. scores (minmax norm)")
+```
+
+```{r}
+#| include: false
+
+p16 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(n_low_reg_dist_lepi_pa),
+                 col = "n_low_reg_dist_lepi_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(n_low_reg_dist_lepi_pa),
+                  col = "n_low_reg_dist_lepi_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant, 
+                 y = norm_minmax(n_low_reg_dist_plant_pa),
+                 col = "n_low_reg_dist_plant_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_plant, 
+                  y = norm_minmax(n_low_reg_dist_plant_pa),
+                  col = "n_low_reg_dist_plant_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(n_low_reg_dist_pa),
+                 col = "n_low_reg_dist_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(n_low_reg_dist_pa),
+                  col = "n_low_reg_dist_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(n_low_reg_dist_multidiv),
+                 col = "n_low_reg_dist_multidiv")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(n_low_reg_dist_multidiv),
+                  col = "n_low_reg_dist_multidiv"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi,
+                 y = norm_minmax(cwm_n_low_reg_dist_lepi),
+                 col = "cwm_n_low_reg_dist_lepi")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_lepi,
+                  y = norm_minmax(cwm_n_low_reg_dist_lepi),
+                  col = "cwm_n_low_reg_dist_lepi"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_plant,
+                 y = norm_minmax(cwm_n_low_reg_dist_plant),
+                 col = "cwm_n_low_reg_dist_plant")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_plant,
+                  y = norm_minmax(cwm_n_low_reg_dist_plant),
+                  col = "cwm_n_low_reg_dist_plant"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_low_reg_dist_lepi_pa" = "skyblue",
+                                "n_low_reg_dist_plant_pa" = "gold",
+                                "n_low_reg_dist_pa" = "chocolate",
+                                "n_low_reg_dist_multidiv" = "maroon",
+                                "cwm_n_low_reg_dist_lepi" = "slateblue",
+                                "cwm_n_low_reg_dist_plant" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "n low reg. dist. scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-sum-small-reg-dist
+#| fig-cap: "Sum of species with small regional distribution range (i.e. ≤ 33% of regional occupancy) per site."
+ggarrange(p15, 
+          p16, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   Multidiv and CWM scores does not give a different information than PA score. We should keep the simplest to calculate i.e. PA.
+
+-   In ALB, it is more probable to find species with low regional distribution in low-abundance communities than in high-abundance communities.
+
+-   No clear relationship in SCH, possibly due to low number of species with low regional distribution (see @tbl-sp-summary-low-reg-dist). This score should now be used for region SCH.
+
+### Interactions scores
+
+Since these scores already contain information on the interaction of both taxa, we only calculated PA scores for both taxa combined and did not calculated CWM nor multidiv.
+
+-   Sum of trophic interactions: the sum of plant-butterfly trophic interactions per species present at each site. This score was calculated in a slightly different way. Instead of first summing up all known interactions at regional-level per species, then summing the interactions when the species were present per site, we summed single interactions for each pair of plant-butterfly species only if both species were present at each site. The first method renders a potential number of links, but not the actual number of interactions per site.
+
+-   Sum of unique interactions: Sum of Lepidoptera species present in a community with unique trophic interactions (i.e. a butterfly interacting with one species of plant only).
+
+-   Average co-occurrences: average of the number of plant-butterfly co-occurrences per species present at each site.
+
+```{r}
+#| include: false
+
+p17 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(sum_troph_int_pa),
+                 col = "sum_troph_int_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(sum_troph_int_pa),
+                  col = "sum_troph_int_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(n_unique_int_pa),
+                 col = "n_unique_int_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(n_unique_int_pa),
+                  col = "n_unique_int_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(av_cooccur_pa),
+                 col = "av_cooccur_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(av_cooccur_pa),
+                  col = "av_cooccur_pa"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_troph_int_pa" = "skyblue",
+                                # "av_troph_int_pa" = "gold",
+                                "n_unique_int_pa" = "chocolate",
+                                "av_cooccur_pa" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Species interactions scores (minmax norm)")
+p17
+```
+
+```{r}
+#| include: false
+
+p18 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(sum_troph_int_pa),
+                 col = "sum_troph_int_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(sum_troph_int_pa),
+                  col = "sum_troph_int_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(n_unique_int_pa),
+                 col = "n_unique_int_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(n_unique_int_pa),
+                  col = "n_unique_int_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(av_cooccur_pa),
+                 col = "av_cooccur_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(av_cooccur_pa),
+                  col = "av_cooccur_pa"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_troph_int_pa" = "skyblue",
+                                # "av_troph_int_pa" = "gold",
+                                "n_unique_int_pa" = "chocolate",
+                                "av_cooccur_pa" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Species interactions scores (minmax norm)")
+p18
+```
+
+```{r, fig.height=8}
+#| label: fig-site-interactions
+#| fig-cap: "Interaction scores per site."
+ggarrange(p17, 
+          p18, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   In both regions, av. co-occurrences and sum of trophic interactions show similar patterns and might be highly correlated. So we use the interactions instead.
+-   Few sites present unique trophic interactions, which might be worthy for conservation. We should take this score.
+-   The interaction scores show a similar pattern when plotted against both, abundance and species richness.
+-   In ALB, Lepidoptera species with a unique interaction are present at communities with higher richness and abundance only. In SCH in contrast, unique interactions are present only at communities with high-level richness and mid-level abundance.
+
+### Network-level scores
+
+-   Connectance: is the realized proportion of possible links per site. It is calculated as Connectance (C) = realized proportion of possible links. C = L/(IJ). Where, L = number of realized links in a network; I = number of lower trophic level species (i.e. plants); J = number of higher trophic level species (i.e. Lepidoptera).
+
+-   Nestedness: we used the index NODF as implemented in the package bipartite [@dormann2008] which is the nestedness measure proposed by @almeida-neto2008a, correcting for matrix fill and matrix dimensions. Values of 0 indicate non-nestedness, those of 100 perfect nesting. We then substracted the observed (obs) nestedness of each network to the mean nestedness of 1000 null models (i.e. expected nestedness) networks produced using the "vaznull" model implemented using the function bipartite::nullmodel. The Vaznull is a null model with constrained connectance and moderately constrained marginal totals that results in a list of N randomised matrices with the same dimensions and connectivity as the initial web [@vázquez2007].
+
+-   The score named final nestedness is the observed minus the mean of the nestedness of the null models. The higher the value the more nested the network.
+
+-   For the z-score value of nestedness, the mean is centred to zero (by subtracting the mean nestedness value of the 1000 null models) and then divided by the standard deviation of the 1000 null models, therefore, values are standardised to be able to compare between networks. The formula used was: Z~NODF~ = (NODF~observed~ − NODF~null~) / σ~NODFnull~.
+
+-   This is a novel conservation goal assuming that consumer-resource communities that are trophically well-connected are more stable against future perturbations. Connectance and nestedness should be considered together for optimization, always optimize for high values of both connectance and nestedness [@memmott2004; @burgos2007].
+
+```{r}
+#| include: false
+
+p19 <-
+  scores_site %>% 
+  filter(!is.na(z_score_nest_pa)) %>% 
+  ggplot() +
+  geom_point(aes(x = sN_multidiv, 
+                 y = norm_minmax(connectance_pa),
+                 col = "connectance_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_multidiv, 
+                  y = norm_minmax(connectance_pa),
+                  col = "connectance_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(z_score_nest_pa),
+                 col = "z_score_nest_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(z_score_nest_pa),
+                  col = "z_score_nest_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_multidiv,
+                 y = norm_minmax(final_nest_pa),
+                 col = "final_nest_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sN_multidiv,
+                  y = norm_minmax(final_nest_pa),
+                  col = "final_nest_pa"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("connectance_pa" = "maroon",
+                                "z_score_nest_pa" = "slateblue",
+                                "final_nest_pa" = "skyblue")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Network-level scores (minmax norm)")
+p19
+```
+
+```{r}
+#| include: false
+
+p20 <-
+  scores_site %>% 
+  filter(!is.na(z_score_nest_pa)) %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_multidiv, 
+                 y = norm_minmax(connectance_pa),
+                 col = "connectance_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_multidiv, 
+                  y = norm_minmax(connectance_pa),
+                  col = "connectance_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(z_score_nest_pa),
+                 col = "z_score_nest_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(z_score_nest_pa),
+                  col = "z_score_nest_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_multidiv,
+                 y = norm_minmax(final_nest_pa),
+                 col = "final_nest_pa")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_multidiv,
+                  y = norm_minmax(final_nest_pa),
+                  col = "final_nest_pa"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 2), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("connectance_pa" = "maroon",
+                                "z_score_nest_pa" = "slateblue",
+                                "final_nest_pa" = "skyblue")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Network-level scores (minmax norm)")
+p20
+```
+
+```{r, fig.height=8}
+#| label: fig-site-network-level-scores
+#| fig-cap: "Network-level scores (connectance and nestedness) againt scaled abundance and richness."
+
+ggarrange(p19, 
+          p20, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+
+```
+
+Conclusions:
+
+-   Connectance decreases with increasing richness and abundance in ALB region, and slightly increasing in SCH with species richness but showing no relationship with abundance. Decrease in connectance is expected, if realized links stays constant and richness of either plants or butterflies or both increases, or on the other hand, if richness stays constant but the number of links decreases. This might be due to high presence of generalists in low abundance/richness communities and high presence of specialist on highly abundant/richness communities.
+
+-   Nestedness, as represented by z-scores values (a measure that can be compared between networks), increases with increasing abundance and richness in SCH and with richness in ALB, but slightly decreases with increasing abundance in ALB.
+
+**Connectance vs. Species richness (unscaled values)**
+
+```{r}
+#| label: fig-site-raw-connectance
+#| fig-cap: "Raw connectance against the (unscaled) species richness values."
+scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = n_spp, y = connectance_pa, col = "Combined")) + 
+  geom_point(aes(x = n_plant, y = connectance_pa, col = "Plants")) + 
+  geom_point(aes(x = n_lepi, y = connectance_pa, col = "Lepidoptera")) + 
+  scale_color_manual(name = "",
+                     values = c("Plants" = "seagreen",
+                                "Lepidoptera" = "slateblue",
+                                "Combined" = "chocolate")) +
+  facet_wrap(~region, scales = "free") +
+  labs(x = "Species richness", 
+       y = "Connectance (= Links/(n Plants * n Lepi))") + 
+  theme(legend.position="bottom")
+```
+
+**Connectance of all sites (networks) vs. incidence-matrix size:**
+
+```{r}
+#| label: fig-site-connectance-vs-matrix-size
+#| fig-cap: "Raw connectance against the matrix-size per site."
+scores_site %>% 
+  mutate(m_size = n_lepi * n_plant) %>% 
+  ggplot() +
+  geom_point(aes(x = m_size, y = connectance_pa), color = "slateblue") +
+  geom_smooth(aes(x = m_size, y = connectance_pa),
+              method = lm,
+              se = FALSE) +
+  facet_wrap("region") +
+  labs(x = "Incidence matrix size (log 10 scale)",
+       y = "Connectance") +
+  scale_x_continuous(trans = 'log10') +
+  scale_y_continuous(trans = 'log10')
+```
+
+Conclusions:
+
+-   In ALB, connectance does not show increase with increasing incidence matrix.
+
+-   In SCH, communities with higher incidence matrix show higher levels of connectance.
+
+**Check correlation between connectance and nestedness**
+
+Include:
+
+-   connectance against obs nestedness
+
+-   connectance against final nestedness
+
+-   connectance against z-score of nestedness
+
+```{r}
+#| label: tbl-site-cor-connectance-nestedness-ALB
+#| tbl-cap: "Spearman's Rank correlations between connectance against observed, final (obs - exp) and z-scores nestedness per site - ALB."
+
+scores_site_clean_ALB <- scores_site %>% 
+  filter(!is.na(obs_nest_pa)) %>% 
+  filter(region == "ALB") %>% 
+  select(connectance_pa, obs_nest_pa, final_nest_pa, z_score_nest_pa)
+
+
+res_ALB <- cor(scores_site_clean_ALB, method = "spearman") 
+
+# Send to 'kable' for formatting as a table
+res_ALB %>% 
+  kable(booktabs = TRUE) %>% 
+  kable_styling(font_size = 12)
+```
+
+```{r}
+#| label: tbl-site-cor-connectance-nestedness-SCH
+#| tbl-cap: "Spearman's Rank correlations between connectance against observed, final (obs - exp) and z-scores nestedness per site - SCH."
+
+scores_site_clean_SCH <- scores_site %>% 
+  filter(!is.na(obs_nest_pa)) %>% 
+  filter(region == "SCH") %>% 
+  select(connectance_pa, obs_nest_pa, final_nest_pa, z_score_nest_pa)
+
+res_SCH <- cor(scores_site_clean_SCH, method = "spearman") 
+
+# Send to 'kable' for formatting as a table
+res_SCH %>% 
+  kable(booktabs = TRUE) %>% 
+  kable_styling(font_size = 12)
+```
+
+**Check scatter plots between connectance against obs and final nestedness:**
+
+```{r}
+#| label: fig-site-scatterplot-connectance-vs-nestedness
+#| fig-cap: "Scatter plot between connectance against: obs nestedness, final nestedness (obs - exp), and z-scores of nestedness per site."
+
+scores_site %>% 
+  filter(!is.na(obs_nest_pa)) %>% 
+  ggplot() + 
+  geom_point(aes(x = connectance_pa, 
+                 y = obs_nest_pa, 
+             col = "obs nestedness")) +
+    geom_smooth(method = lm,
+              aes(x = connectance_pa,
+                  y = obs_nest_pa,
+                  col = "obs nestedness"),
+              se = FALSE) +
+  geom_point(aes(x = connectance_pa, 
+                 y = final_nest_pa, 
+             col = "obs - exp nestedness")) +
+  geom_smooth(method = lm,
+              aes(x = connectance_pa,
+                  y = final_nest_pa,
+                  col = "obs - exp nestedness"),
+              se = FALSE) +   
+  geom_point(aes(x = connectance_pa, 
+                 y = z_score_nest_pa,
+              col = "z-scores nestedness")) + 
+  geom_smooth(method = lm,
+              aes(x = connectance_pa,
+                  y = z_score_nest_pa,
+                  col = "z-scores nestedness"),
+              se = FALSE) +   
+  facet_wrap(~region) + 
+  scale_color_manual(name = "",
+                     values = c("obs nestedness" = "skyblue",
+                                "obs - exp nestedness" = "slateblue",
+                                "z-scores nestedness" = "seagreen")) + 
+  theme(legend.position = "bottom") + 
+  labs(x = "connectance", 
+       y = "Nestedness")
+```
+
+### Crop pollination
+
+The total number of flowering crops that the Lepidoptera species present in a community can pollinate from the total regional pool of commercial crops.
+
+```{r}
+#| include: false
+p19 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(sum_crops_pa),
+                 col = "sum_crops_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(sum_crops_pa),
+                  col = "sum_crops_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(av_crops_pa),
+                 col = "av_crops_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(av_crops_pa),
+                  col = "av_crops_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi,
+                 y = norm_minmax(cwm_av_crops),
+                 col = "cwm_av_crops")) +
+  geom_smooth(method = lm,
+              aes(x = sN_lepi,
+                  y = norm_minmax(cwm_av_crops),
+                  col = "cwm_av_crops"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 1), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_crops_pa" = "skyblue",
+                                "av_crops_pa" = "gold",
+                                "cwm_av_crops" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Pollination scores (minmax norm)")
+```
+
+```{r}
+#| include: false
+
+p20 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(sum_crops_pa),
+                 col = "sum_crops_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(sum_crops_pa),
+                  col = "sum_crops_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(av_crops_pa),
+                 col = "av_crops_pa")) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(av_crops_pa),
+                  col = "av_crops_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi,
+                 y = norm_minmax(cwm_av_crops),
+                 col = "cwm_av_crops")) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_lepi,
+                  y = norm_minmax(cwm_av_crops),
+                  col = "cwm_av_crops"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 1), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("sum_crops_pa" = "skyblue",
+                                "av_crops_pa" = "gold",
+                                "cwm_av_crops" = "seagreen")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Pollination scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-crop-pollination
+#| fig-cap: "Flowering crop pollinaton scores against (max) scaled abundance and richness per site."
+
+ggarrange(p19, 
+          p20, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   CWM of crops decreases in all cases with abundance and richness.
+
+-   Sum and average of pollinated crops show almost no relationship with abundance nor richness in ALB, but only the average pollinated crops per site show no major relationship in SCH. In comparison, the sum of pollinated crops in SCH increases with increasing abundance and richness.
+
+-   Probably, average is better than sum, because it is less influenced by abundance and richness, but for economic modelling, the easier to calculate and to explain would be the sum of pollinated crops.
+
+### Crop pest
+
+The total number of Lepidoptera species present in a community, for which their larvae are considered crop pests.
+
+```{r}
+#| include: false
+p21 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sN_lepi, 
+                 y = norm_minmax(n_crop_pests_pa),
+                 col = "n_crop_pests_pa"),
+             alpha = 0.5) +
+  geom_smooth(method = lm, 
+              aes(x = sN_lepi, 
+                  y = norm_minmax(n_crop_pests_pa),
+                  col = "n_crop_pests_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sN_lepi,
+                 y = norm_minmax(cwm_n_crop_pest),
+                 col = "cwm_n_crop_pest"),
+             alpha = 0.5) +
+  geom_smooth(method = lm,
+              aes(x = sN_lepi,
+                  y = norm_minmax(cwm_n_crop_pest),
+                  col = "cwm_n_crop_pest"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 1), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_crop_pests_pa" = "skyblue",
+                                "cwm_n_crop_pest" = "chocolate")) +
+  facet_wrap(~region) + 
+  labs(x = "Species richness (max scaled)", 
+       y = "Crop pest scores (minmax norm)")
+```
+
+```{r}
+#| include: false
+
+p22 <-
+  scores_site %>% 
+  ggplot() +
+  geom_point(aes(x = sAbund_lepi, 
+                 y = norm_minmax(n_crop_pests_pa),
+                 col = "n_crop_pests_pa"),
+             alpha = 0.5) +
+  geom_smooth(method = lm, 
+              aes(x = sAbund_lepi, 
+                  y = norm_minmax(n_crop_pests_pa),
+                  col = "n_crop_pests_pa"),
+              se = FALSE) +
+  geom_point(aes(x = sAbund_lepi,
+                 y = norm_minmax(cwm_n_crop_pest),
+                 col = "cwm_n_crop_pest"),
+             alpha = 0.5) +
+  geom_smooth(method = lm,
+              aes(x = sAbund_lepi,
+                  y = norm_minmax(cwm_n_crop_pest),
+                  col = "cwm_n_crop_pest"),
+              se = FALSE) +
+  coord_cartesian(xlim =c(0, 1), ylim = c(0, 1)) +
+  scale_color_manual(name = "",
+                     values = c("n_crop_pests_pa" = "skyblue",
+                                "cwm_n_crop_pest" = "chocolate")) +
+  facet_wrap(~region) + 
+  labs(x = "Species abundance (max scaled)", 
+       y = "Crop pest scores (minmax norm)")
+```
+
+```{r, fig.height=8}
+#| label: fig-site-crop-pests
+#| fig-cap: "Crop pests scores against (max) scaled abundance and richness per site."
+
+ggarrange(p21, 
+          p22, 
+          ncol = 1, 
+          nrow = 2, 
+          labels = c("A", "B"), 
+          label.x = 0,
+          common.legend = T,
+          legend = "bottom",
+          align = "v")
+```
+
+Conclusions:
+
+-   Higher number of crops pests in communities with low richness and abundance levels. This might be due to the fact that the only two butterflies for which their larva are considered pest are two very common generalist butterflies, namely *P. rapae* and *P. brassicae*. Therefore, taking into account our previous results that generalists were more dominant in low richness/abundance level communities, it is expected to find those crop pests in the lower end of the x-axis.
+
+## Scores correlations
+
+### Red list
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    n_red_list_pa,
+    n_red_list_multidiv,
+    cwm_n_red_list_lepi,
+    cwm_n_red_list_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    n_red_list_pa,
+    n_red_list_multidiv,
+    cwm_n_red_list_lepi,
+    cwm_n_red_list_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins c(bottom, left, top, right) 
+         title = "Red list scores - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar=c(0,0,2,0), # correct margins
+         title = "Red list scores - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   no differences between PA and multidiv scores for both taxa combined
+
+-   PA and CWM scores highly correlated i.e. they give similar information
+
+-   we take each taxa per separate, to be able to optimise models for each individual taxa. It does not make sense to combine red list information.
+
+-   lepi PA score is highly correlated with lepi richness and abundance
+
+-   plant PA score is not correlated with lepi richness and abundance
+
+-   based on this, we use only the PA scores, because for conservation it makes more sense to include a species independent of it abundance
+
+### Threat category
+
+Compare also to red PA list scores
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_threat_lepi_pa,
+    av_threat_plant_pa,
+    av_threat_pa,
+    cwm_av_threat_lepi,
+    cwm_av_threat_plant,
+    sum_threat_lepi_pa,
+    sum_threat_plant_pa,
+    sum_threat_multidiv,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_threat_lepi_pa,
+    av_threat_plant_pa,
+    av_threat_pa,
+    cwm_av_threat_lepi,
+    cwm_av_threat_plant,
+    sum_threat_lepi_pa,
+    sum_threat_plant_pa,
+    sum_threat_multidiv,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "All red list scores - ALB",
+         number.cex = 0.7, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "All red list scores - SCH",
+         number.cex = 0.7, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   n_red_list_lepi_pa is highly correlated with all other lepi red list scores. Nevertheless, threat scores inform us how critically endangered are the species present in a community, therefore they are also an important indicator. We should then consider, for ecological modelling, one of the threat-scores and the number of red list, but not together in the same scenario.
+
+-   for butterflies, the high correlation between the different scores indicates that they give similar information, therefore, for economic optimisation we pick the simplest one i.e. n of red list species.
+
+-   for plants, n red list is not highly correlated with av. threat, but highly correlated to CWM of the av. threat, the sum of threat, and both taxa combined.
+
+-   in ALB, plant red list species are not highly correlated to the abundance of plant species, but to the richness.
+
+-   in SCH, scores are not correlated to richness nor abundance, but this is due that in SCH only one red list species is present in the the whole region.
+
+-   for economic optimisation we choose only number of red list species. For ecological modelling, we choose number of red list species and average threat. The choice of average against sum is because when averaging we can compare the level of threat between communities.
+
+### Regional distribution range
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    cwm_av_reg_dist_lepi,
+    cwm_av_reg_dist_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    cwm_av_reg_dist_lepi,
+    cwm_av_reg_dist_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Av. regional distribution scores - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Av. regional distribution scores - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   in ALB and SCH, av. regional distribution of both taxa are highly correlated with their respective CWM scores, therefore, we pick the simplest score i.e. average reg dist, at least for economic modelling.
+
+-   in ALB, both PA and CWM average reg dist scores of lepi are negatively correlated with lepi abundance and richness, and with plant richness, but positively correlated with plant abundance.
+
+-   in SCH, both PA and CWM average reg dist scores of lepi are negatively correlated with lepi abundance and richness, and are negatively (but slightly) correlated with plant richness, but not correlated with plant abundance
+
+### Species with small regional distribution range
+
+Species present per community with a regional distribution range ≤ 33% of the total regional area. Compare also to the average regional distribution scores.
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    n_low_reg_dist_lepi_pa,
+    n_low_reg_dist_plant_pa,
+    n_low_reg_dist_pa,
+    n_low_reg_dist_multidiv,
+    cwm_n_low_reg_dist_lepi,
+    cwm_n_low_reg_dist_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    n_low_reg_dist_lepi_pa,
+    n_low_reg_dist_plant_pa,
+    n_low_reg_dist_pa,
+    n_low_reg_dist_multidiv,
+    cwm_n_low_reg_dist_lepi,
+    cwm_n_low_reg_dist_plant,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Low regional distribution scores - ALB",
+         number.cex = 0.7, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Low regional distribution scores - SCH",
+         number.cex = 0.7, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   in SCH, 5 sites with only 1 species with regional distribution ≤ 33% of the total area of Brandenburg, therefore, correlations do not work and it does not make sense to use this score for either optimisation.
+
+-   in ALB, the simple PA per taxa score delivers similar information than the more complex scores, therefore we select PA score per taxa.
+
+-   av. regional distribution and n low dist. give similar information in ALB
+
+-   in SCH, it does not make sense to use the score n low reg dist given that only one species has a distribution ≤ 33 % of the total regional area.
+
+-   in general might be better to use only av. reg. dist. (PA).
+
+### Interaction scores
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    sum_troph_int_pa,
+    n_unique_int_pa,
+    av_cooccur_pa,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    sum_troph_int_pa,
+    n_unique_int_pa,
+    av_cooccur_pa,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Interaction scores - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Interaction scores - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   In both regions, sum of troph int is highly correlated to species richness.
+
+-   For economical optimization, co-occurrence score might be overly complicated to explain and does not represent the actual interactions per species (see @fig-sp-cooccur-vs-troph-int-alb and @fig-sp-cooccur-vs-troph-int-sch). Even though correlated, we would consider sum of trophic interactions, but not together with species richness in the same model.
+
+-   We also pick n_unique_int, which is not correlated to abundance nor to richness.
+
+### Network-level scores
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    connectance_pa, 
+    obs_nest_pa,
+    final_nest_pa,
+    z_score_nest_pa,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    connectance_pa, 
+    obs_nest_pa,
+    final_nest_pa,
+    z_score_nest_pa,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Network-level scores - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Network-level scores - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   Only z-scores of nestedness can be compared between sites, therefore we can only use this score for modelling. The higher the value the more nestedness the network is.
+
+-   In both regions, connectance is not highly correlated to nestedness nor to species abundance or richness.
+
+-   We use z-scores and connectance.
+
+### Pollination and crop pests
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    sum_crops_pa,
+    av_crops_pa,
+    cwm_av_crops,
+    n_crop_pests_pa,
+    cwm_n_crop_pest,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    sum_crops_pa,
+    av_crops_pa,
+    cwm_av_crops,
+    n_crop_pests_pa,
+    cwm_n_crop_pest,
+    sN_lepi,
+    sN_plant, 
+    sN_multidiv,
+    sAbund_lepi, 
+    sAbund_plant, 
+    sAbund_multidiv
+  ) %>% 
+  cor(method = "spearman")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Pollination and crop pests scores - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Pollination and crop pests scores - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+Conclusions:
+
+-   sum of crops is highly correlated with av. crops and CWM crops, therefore, we should pick the easier to calculate one, at least for the economic modelling part.
+
+-   sum of crops is not correlated to neither abundance nor richness of any taxa (or both combined)
+
+-   sum of scores correspond to the sum of any crop which is pollinated by butterflies, hence, some crops might be double counted. we explicitly decided to calculate this way, because we want to have insurance that the crop will be pollinated by as many lepi as possible.
+
+## Selected scores for economic optimization
+
+```{r, fig.width=9, fig.height=7}
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    n_lepi,
+    n_plant,
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa, 
+    connectance_pa,
+    z_score_nest_pa,
+    n_crop_pests_pa,
+    sum_crops_pa
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    n_lepi,
+    n_plant,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa,
+    connectance_pa,
+    z_score_nest_pa,
+    n_crop_pests_pa,
+    sum_crops_pa,
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for economic optimization - ALB",
+         number.cex = 0.6, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for economic optimization - SCH",
+         number.cex = 0.6, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+```{r}
+#| include: false
+
+# save correlation plots 
+
+pdf(file = "output/plots/economic_modelling/corrplot_scores_econom_ALB.pdf")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for economic optimization - ALB",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+dev.off()
+```
+
+```{r}
+#| include: false
+
+# save correlation plot SCH
+
+pdf(file = "output/plots/economic_modelling/corrplot_scores_econom_SCH.pdf")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for economic optimization - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+dev.off()
+```
+
+```{r}
+#| include: false
+
+## ---- create subset of scores_site with scores for economic optimization
+
+scores_site_econom <-
+  scores_site %>% 
+  select(
+    region, 
+    epid,
+    n_lepi,
+    n_plant,
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa, 
+    connectance_pa,
+    z_score_nest_pa,
+    sum_crops_pa,
+    n_crop_pests_pa
+  ) %>% 
+    mutate(n_red_list_lepi_pa = 
+             if_else(region == "SCH", NA_integer_, n_red_list_lepi_pa),
+           n_red_list_plant_pa = 
+             if_else(region == "SCH", NA_integer_, n_red_list_plant_pa))
+```
+
+```{r}
+#| include: false
+
+# save data 
+write_csv(scores_site_econom, 'data/processed/scores_economic.csv')
+```
+
+<!-- ## Selected scores for ecological optimization -->
+
+```{r, fig.width=9, fig.height=7}
+#| include: false
+
+# Pairwise comparison using cor() and corrplot()
+
+corrM_ALB <-
+  scores_site %>% 
+  filter(region == "ALB") %>% 
+  select(
+    n_lepi,
+    n_plant,
+    sN_multidiv,
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_threat_lepi_pa,
+    av_threat_plant_pa,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa, 
+    connectance_pa,
+    z_score_nest_pa,
+    cwm_av_crops,
+    cwm_n_crop_pest
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrM_SCH <-
+  scores_site %>% 
+  filter(region == "SCH") %>% 
+  select(
+    n_lepi,
+    n_plant,
+    sN_multidiv,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa,
+    connectance_pa,
+    z_score_nest_pa,
+    cwm_av_crops,
+    cwm_n_crop_pest
+  ) %>% 
+  cor(method = "spearman", use = 'pairwise.complete.obs')
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for ecological optimization - ALB",
+         number.cex = 0.6, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for ecological optimization - SCH",
+         number.cex = 0.6, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+```
+
+```{r}
+#| include: false
+
+# save correlation plots - ALB
+
+pdf(file = "output/plots/ecological_modelling/corrplot_scores_ecol_ALB.pdf")
+
+corrplot(corrM_ALB, 
+         # p.mat = cor.mtest(corrM_ALB, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for ecological modelling - ALB",
+         number.cex = 0.7, # adjust text size of numbers
+         tl.cex	= 0.8, 
+         tl.col = "black")
+
+dev.off()
+```
+
+```{r}
+#| include: false
+
+# save correlation plots - SCH
+
+pdf(file = "output/plots/ecological_modelling/corrplot_scores_ecol_SCH.pdf")
+
+corrplot(corrM_SCH, 
+         # p.mat = cor.mtest(corrM_SCH, conf.level = 0.95)$p, # add n.s.
+         method = "number", 
+         type = "lower", 
+         diag = F,
+         mar = c(0,0,2,0), # correct margins
+         title = "Selected scores for ecological modelling - SCH",
+         number.cex = 0.8, # adjust text size of numbers
+         tl.cex	= 0.8,
+         tl.col = "black")
+
+dev.off()
+```
+
+```{r}
+#| include: false
+
+## ---- create subset of scores_site with scores for economic optimization
+
+scores_site_ecological <-
+  scores_site %>% 
+  select(
+    region, 
+    epid,
+    n_lepi,
+    n_plant,
+    sN_multidiv,
+    n_red_list_lepi_pa,
+    n_red_list_plant_pa,
+    av_threat_lepi_pa,
+    av_threat_plant_pa,
+    av_reg_dist_lepi_pa,
+    av_reg_dist_plant_pa,
+    sum_troph_int_pa, 
+    n_unique_int_pa, 
+    connectance_pa,
+    z_score_nest_pa,
+    cwm_av_crops,
+    cwm_n_crop_pest
+  ) %>% 
+    mutate(n_red_list_lepi_pa = 
+             if_else(region == "SCH", NA_integer_, n_red_list_lepi_pa),
+           n_red_list_plant_pa = 
+             if_else(region == "SCH", NA_integer_, n_red_list_plant_pa),
+           av_threat_lepi_pa = 
+             if_else(region == "SCH", NA_integer_, av_threat_lepi_pa),
+           av_threat_plant_pa = 
+             if_else(region == "SCH", NA_integer_, av_threat_plant_pa))
+```
+
+```{r}
+#| include: false
+
+# save data 
+write_csv(scores_site_ecological, 'data/processed/scores_ecological.csv')
+```

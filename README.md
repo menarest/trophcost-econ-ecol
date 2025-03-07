@@ -8,7 +8,7 @@ This repository contains the analysis done for Menares et al. (2025), which adap
 # Requirements: 
 
 > [!NOTES]
-> check that the datasets are named the same as in the data reading steps in the scripts so you can run the analyses with no problem.
+> check that the datasets paths and names match the readed data in the scripts so you can run the analyses with no problem.
 > The optimization results were obtained using a C# implementation of the heuristic greedy algorithm in Visual Studio 2019 and a MySQL database tailored to the project's datasets. While the optimization method is transferable, the implementation is tailored to the project. The C# code can be obtained by request from the authors.
 
 - The Quarto document scores_exploration.qmd explores and selects the scores used the optimisations. 

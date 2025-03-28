@@ -1851,6 +1851,18 @@ summary_tbl_indicators <-
   mutate(across(where(is.numeric), ~round(., digits = 0)))
 summary_tbl_indicators
 
+summary_tbl_indicators_sd <- 
+  sum_ecovalues_2505 %>%
+  rowwise() %>% 
+  transmute(
+    optimisation = optimisation,
+    median_ecoval = median(c_across(butterfly_richness:crop_pest_potential)),
+    mean_ecoval = mean(c_across(butterfly_richness:crop_pest_potential)),
+    sd_ecoval = sd(c_across(butterfly_richness:crop_pest_potential))) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 0)))
+summary_tbl_indicators_sd
+
+
 ## ---- work on the budgets 
 
 # 1. Extract the maximum used budget per optimisation 
@@ -2092,6 +2104,18 @@ summary_tbl_scenarios_ref_single_indicators <-
   mutate(across(where(is.numeric), ~round(., digits = 0)))
 summary_tbl_scenarios_ref_single_indicators
 
+
+summary_tbl_scenarios_ref_single_indicators_sd <-
+  sum_ecovalues_scenarios_2505 %>%
+  rowwise() %>% 
+  transmute(
+    optimisation = optimisation,
+    median_ecoval = median(c_across(butterfly_richness:crop_pest_potential)),
+    mean_ecoval = mean(c_across(butterfly_richness:crop_pest_potential)),
+    sd_ecoval = sd(c_across(butterfly_richness:crop_pest_potential))) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 0)))
+summary_tbl_scenarios_ref_single_indicators_sd
+
 ## ---- work on the budgets 
 
 # we should perform the following operation: a / b, where: 
@@ -2316,10 +2340,12 @@ for(i in 1:19) {
 
 dev.off()
 
+## 2.4 Appendix A13 ------------------------------------------------------
+
 # summary table with the median and mean ecovalue reached per optimization across all indicators in the trade-offs/synergies analysis using the single indicators' ecovalue reached when optimizing cost-effectively for that same single indicator 
 
-summary_tbl_indicators %>% 
-  bind_rows(summary_tbl_scenarios_ref_single_indicators) %>% 
+summary_tbl_indicators_sd %>% 
+  bind_rows(summary_tbl_scenarios_ref_single_indicators_sd) %>% 
   mutate(
     optimisation = optimisation %>% 
       str_replace("crop_pest_potential", "Crop pests") %>% 
@@ -2351,9 +2377,9 @@ summary_tbl_indicators %>%
 
 
 
-## 2.4 Original scale indicator values ---------------------------------------
+## 2.5 Original scale indicator values -----------------------------------
 
-### 2.4.1 Testing undo min-max scaling function variables per region ---------
+### 2.5.1 Testing undo min-max scaling function variables per region -----
 
 # Min-Max Normalization transforms x to x’ by converting each value of features to a range between 0 and 1, and this is also known as (0–1) Normalization. If the data has negative values the range would have been between -1 and 1.
 
@@ -2524,7 +2550,7 @@ inv <- function(x)1/x
 
 
 
-### 2.4.2 Undo transformations ------------------------------------------------
+### 2.5.2 Undo transformations -------------------------------------------
 
 my_list <-
   list(
@@ -2599,7 +2625,7 @@ list2env(my_new_list, envir = .GlobalEnv)
 
 
 
-### 2.4.3 Do a table per indicator with original indicator values -------------
+### 2.5.3 Do a table per indicator with original indicator values --------
 
 # add 100%, ecovalues, budget, n of sites...
 

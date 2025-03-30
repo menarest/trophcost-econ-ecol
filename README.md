@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15108447.svg)](https://doi.org/10.5281/zenodo.15108447)
+
 Supplementary code for analyses of Menares, E., Markova-Nenova N., Sturm A., Wätzold F., Birkhofer K. (2025). Cost-effective conservation of multiple goals in grasslands: synergies and trade-offs. In submission.
 
 This repository contains the analysis done for Menares et al. (2025), which adapted an existing optimization procedure to optimize individual and joint conservation goals for butterfly and plant communities in grasslands within two regions in Germany. For all grassland sites, we calculated the costs associated with each management measure and the ecological state measured by multiple attributes. For each region we performed three optimizations: one ecological (budget-unconstrained), and two cost-effectiveness optimizations (budget-constrained) with a low and a medium budget. We compared selected grassland management measures, their costs, and ecological effects for different goals obtained between optimization types and between different goals within the same optimization type.

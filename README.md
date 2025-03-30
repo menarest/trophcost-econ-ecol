@@ -4,6 +4,9 @@ Supplementary code for analyses of Menares, E., Markova-Nenova N., Sturm A., Wä
 
 This repository contains the analysis done for Menares et al. (2025), which adapted an existing optimization procedure to optimize individual and joint conservation goals for butterfly and plant communities in grasslands within two regions in Germany. For all grassland sites, we calculated the costs associated with each management measure and the ecological state measured by multiple attributes. For each region we performed three optimizations: one ecological (budget-unconstrained), and two cost-effectiveness optimizations (budget-constrained) with a low and a medium budget. We compared selected grassland management measures, their costs, and ecological effects for different goals obtained between optimization types and between different goals within the same optimization type.
 
+This study was based on data from previous projects of the Biodiversity Exploratories program (DFG Priority Program 1374). These can be found under ID 23586, 12526, 26487, 
+and 20826). All scripts for analyses can be found in the repository https://doi.org/10.5281/zenodo.15108446. The optimization results were obtained using a C# implementation of the heuristic greedy algorithm in Visual Studio 2019 and a MySQL database tailored to the project's datasets. While the optimization method is transferable, the implementation is tailored to the project. The C# code can be obtained by request from the authors.
+
 # Requirements: 
 
 > [!NOTES]

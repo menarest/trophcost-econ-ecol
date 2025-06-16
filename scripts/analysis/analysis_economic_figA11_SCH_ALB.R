@@ -14,7 +14,7 @@ library(ggpubr) # for extra ggplot functionalities
 library(ggthemes) # extra themes 
 
 ## ---- set plotting theme
-theme_set(theme_clean(10))
+theme_set(theme_clean(12))
 par(family = "Helvetica")
 
 ## ---- Read in data
@@ -45,7 +45,7 @@ list(
 
 
 
-# Fig. 2A - Indicators - Overall Cost -------------------------------------
+# Fig. A11(a) - Indicators - Overall Cost -------------------------------------
 
 # add panel A costs per plots (add SCH in other color). 
 
@@ -107,7 +107,7 @@ p_figA11_A
 # save plot 
 
 ggsave(
-  filename = "figA11A_cost_per_opti_across_all_sites.pdf",
+  filename = "figA11_cost_per_opti_across_all_sites.pdf",
   plot = last_plot(),
   path = "output/plots/economic_modelling/",
   dpi = "retina",
@@ -118,7 +118,7 @@ ggsave(
   colormodel = "cmyk"
 ) 
 
-# Fig. 2B - Indicators - Mean Cost per region --------------------------------
+# Fig. A11(b) - Indicators - Mean Cost per region --------------------------------
 
 # ADD panel B: cost per region, divide per number of plots. Add SCH with other color.
 
@@ -193,7 +193,7 @@ ggsave(
   colormodel = "cmyk"
 ) 
 
-# Fig. 2C - Scenarios - Overall Cost  ---------------------------------------
+# Fig. A11(c) - Scenarios - Overall Cost  ---------------------------------------
 
 p_figA11_C <-
   optis_scenarios_alb %>%
@@ -254,7 +254,7 @@ ggsave(
   colormodel = "cmyk"
 ) 
 
-# Fig. 2D - Scenarios - Mean Cost per region --------------------------------
+# Fig. A11(d) - Scenarios - Mean Cost per region --------------------------------
 
 p_figA11_D <-
   optis_scenarios_alb %>%

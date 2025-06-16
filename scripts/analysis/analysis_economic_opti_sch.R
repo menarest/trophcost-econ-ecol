@@ -784,6 +784,8 @@ ggsave(
 
 ### 2.3.1 Single indicators -------------------------------------------------
 
+#' [NOTE]: This figure was not shown. 
+
 ## ---- budget 2505
 
 # lets work on a
@@ -1142,8 +1144,8 @@ for(i in 1:10) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
+    vlcex = 0.6, # font size
+    calcex = 0.6, # font size for caxislabels
     vlabels = vlabels_indicators,
     
     #title
@@ -1153,6 +1155,16 @@ for(i in 1:10) {
   dev.off()
 }
 
+# Prepare labels for collage
+
+vlabels_indicators_collage <- 
+  vlabels_indicators %>% 
+  str_replace("Regional \ndistribution butterflies", "Reg. \ndist. butterflies") %>% 
+  str_replace("\\bTrophic \ninteractions\\b", "Trophic \nints.") %>% 
+  str_replace("Regional \ndistribution plants", "Reg. \ndist. plants") %>% 
+  str_replace("Unique \ntrophic interactions", "Unique \ntrophic ints.") 
+vlabels_indicators_collage
+
 ## ---- Radar chart with all 10 plots combined in one image
 
 # assign paths for image
@@ -1161,7 +1173,7 @@ pdf(file = "output/plots/economic_modelling/SCH/radar_charts_indicators/radar_ch
     height = 9.5)
 
 # Prepare the screen 
-par(mar = c(1, 1, 3, 1))
+par(mar = c(0.5, 0.5, 3, 0.5))
 par(mfrow = c(4, 3))
 
 # Loop for each plot
@@ -1189,9 +1201,9 @@ for(i in 1:10) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
-    vlabels = vlabels_indicators,
+    vlcex = 0.85, # font size
+    calcex = 0.6, # font size for caxislabels
+    vlabels = vlabels_indicators_collage,
     
     #title
     title = mytitle[i]
@@ -1202,8 +1214,10 @@ dev.off()
 
 
 
- ### 2.3.2 Summary radar chart -----------------------------------------------
+### 2.3.2 Summary radar chart -----------------------------------------------
 
+#' [NOTE]: Figure 2b. 
+ 
 # create a summary radar chart with all 12 indicators as nodes and values showing the proportions when optimising for that specific indicator. Also with 4 lines in just one radar chart 
 
 # bind both datasets
@@ -1311,9 +1325,11 @@ radarchart(
   na.itp = FALSE, # Do not interpolate missing values (so it skips missing nodes)
   
   # custom labels
-  vlcex = 0.6, # font size
+  vlcex = 0.7, # font size
   calcex = 0.6, # font size for caxislabels
-  vlabels = vlabels_indicators_sum,
+  vlabels = vlabels_indicators_sum %>% 
+    str_replace("Regional \ndistribution plants", "Regional \ndistribution \nplants") %>% 
+    str_replace("Regional \ndistribution butterflies", "Regional \ndistribution \nbutterflies"),
 )
 
 dev.off()
@@ -1323,7 +1339,9 @@ dev.off()
 
 
 
- ### 2.3.3 Scenarios  -------------------------------------------------------
+### 2.3.3 Scenarios  -------------------------------------------------------
+
+#' [NOTE]: This figure was not shown. 
 
 # Create a radar chart graph for each optimisation. In each radar chart show: 
 ## a) the sum of ecovalue reached in ecol-econ optimization as a % of the maximum sum reachable in the ecol optimization per indicator 
@@ -1567,7 +1585,7 @@ for(i in 1:19) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
+    vlcex = 0.6, # font size
     calcex = 0.5, # font size for caxislabels
     vlabels = vlabels_indicators,
     
@@ -1588,7 +1606,7 @@ pdf(file = "output/plots/economic_modelling/SCH/radar_charts_scenarios/radar_cha
     height = 9.5)
 
 # Prepare the screen 
-par(mar = c(1, 0.5, 2, 0.5))
+par(mar = c(0, 0, 3, 0))
 par(mfrow = c(5, 4))
 
 # Loop for each plot
@@ -1617,12 +1635,9 @@ for(i in 1:19) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
-    vlabels = vlabels_indicators %>%
-      str_replace("Regional \ndistribution plants", "Reg. dist. \nplants") %>% 
-      str_replace("Regional \ndistribution butterflies", "Reg. dist. \nbutterflies") %>% 
-      str_replace("Unique \ntrophic interactions", "Unique trophic \ninteractions"),
+    vlcex = 0.68, # font size
+    calcex = 0.6, # font size for caxislabels
+    vlabels = vlabels_indicators_collage,
     
     #title
     title = mytitle[i]
@@ -1635,6 +1650,8 @@ dev.off()
 
 
 ### 2.3.4 Summary radar chart scenarios  ----------------------------------
+
+#' [NOTE]: Figure 2d.
 
 ## ---- Prepare data
 
@@ -1749,8 +1766,8 @@ vlabels_scenarios_sum <-
   colnames() %>% 
   str_replace_all("_", "-") %>% 
   str_replace_all("all-scores", "All scores") %>%  
-  str_replace_all("All scores-ESS25", "All scores ESS 25%") %>% 
-  str_replace_all("All scores-ESS50", "All scores ESS 50%")
+  str_replace_all("All scores-ESS25", "All scores \nESS 25%") %>% 
+  str_replace_all("All scores-ESS50", "All scores \nESS 50%")
 vlabels_scenarios_sum
 
 pdf(file = "output/plots/economic_modelling/SCH/radar_charts_scenarios/radar_chart_summary_scenarios.pdf",
@@ -1786,7 +1803,7 @@ radarchart(
   na.itp = FALSE, 
   
   # custom labels
-  vlcex = 0.6, # font size
+  vlcex = 0.7, # font size
   calcex = 0.6, # font size for caxislabels
   vlabels = vlabels_scenarios_sum,
   
@@ -1800,6 +1817,8 @@ dev.off()
 
 
 ### 2.3.5 Synergies/trade-offs radar chart, indicators, budget 2505 EUR -------
+
+#' [NOTE]: Figure 4. 
 
 # make a collage with trade-offs and synergies, one radar chart per optimization. Compare only ecovalue within one budget (2505 EUR) of the ecological-economic optimization. As the max reference value (i.e. 100%), use the ecovalue of each indicator reached at the optimization of that specific indicator within the same ecol-econ opti and budget for each node. Add budget lines using the same principle as for ecovalue.
 
@@ -2006,8 +2025,8 @@ for(i in 1:10) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
+    vlcex = 0.6, # font size
+    calcex = 0.6, # font size for caxislabels
     vlabels = vlabels_indicators_sum,
     
     #title
@@ -2017,7 +2036,16 @@ for(i in 1:10) {
   dev.off()
 }
 
+# Prepare labels for trade-offs collage
 
+vlabels_indicators_sum_collage <-
+  vlabels_indicators_sum %>% 
+  str_replace("Regional \ndistribution butterflies", "Reg. dist. \nbutterflies") %>% 
+  str_replace("\\bTrophic \ninteractions\\b", "Trophic ints.") %>% 
+  str_replace("Regional \ndistribution plants", "Reg. dist. \nplants") %>% 
+  str_replace("Unique \ntrophic interactions", "Unique trophic \nints.") %>% 
+  str_replace("Butterfly \nrichness", "Butterfly richness") 
+vlabels_indicators_sum_collage
 
 
 ## ---- Radar chart with all 19 plots combined in one image
@@ -2028,7 +2056,7 @@ pdf(file = "output/plots/economic_modelling/SCH/radar_charts_indicators/tradeoff
     height = 9.5)
 
 # Prepare the screen 
-par(mar = c(1, 1, 3, 1))
+par(mar = c(0, 0, 2.5, 0))
 par(mfrow = c(4, 3))
 
 # Loop for each plot
@@ -2057,11 +2085,10 @@ for(i in 1:10) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
-    vlabels = vlabels_indicators_sum %>% 
-      str_replace("Regional \ndistribution plants", "Regional \ndistribution \nplants") %>% 
-      str_replace("Regional \ndistribution butterflies", "Regional \ndistribution \nbutterflies"),
+    vlcex = 0.9, # font size
+    calcex = 0.6, # font size for caxislabels
+    vlabels = vlabels_indicators_sum_collage %>% 
+      str_replace("Unique trophic \nints.", "Unique trophic ints."),
     
     #title
     title = mytitle[i]
@@ -2073,6 +2100,8 @@ dev.off()
 
 
 ### 2.3.6 Synergies/trade-offs radar chart, scenarios, budget 2505 EUR -------
+
+#' [NOTE]: Figure 5b. 
 
 # use the ecovalue of each indicator reached at the optimization of that specific indicator within the same ecol-econ opti and budget as reference for each node. Add budget lines using the same principle as for ecovalue.
 
@@ -2274,8 +2303,8 @@ for(i in 1:19) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
+    vlcex = 0.6, # font size
+    calcex = 0.6, # font size for caxislabels
     vlabels = vlabels_indicators_sum %>% 
       str_replace("Regional \ndistribution butterflies", "Regional \ndistribution \nbutterflies") %>% 
       str_replace("Regional \ndistribution plants", "Regional \ndistribution \nplants"),
@@ -2297,7 +2326,7 @@ pdf(file = "output/plots/economic_modelling/SCH/radar_charts_scenarios/tradeoffs
     height = 9.5)
 
 # Prepare the screen 
-par(mar = c(1, 0.5, 2, 0.5))
+par(mar = c(0, 0, 2.5, 0))
 par(mfrow = c(5, 4))
 
 # Loop for each plot
@@ -2326,12 +2355,10 @@ for(i in 1:19) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
-    vlabels = vlabels_indicators_sum %>%
-      str_replace("Regional \ndistribution plants", "Regional \ndistribution \nplants") %>% 
-      str_replace("Regional \ndistribution butterflies", "Regional \ndistribution \nbutterflies") %>% 
-      str_replace("Unique \ntrophic interactions", "Unique trophic \ninteractions"),
+    vlcex = 0.7, # font size
+    calcex = 0.6, # font size for caxislabels
+    vlabels = vlabels_indicators_sum_collage %>% 
+      str_replace("Unique trophic \nints.", "Unique trophic ints."),
     
     #title
     title = mytitle[i]
@@ -2339,6 +2366,8 @@ for(i in 1:19) {
 }
 
 dev.off()
+
+
 
 ## 2.4 Appendix A13 ------------------------------------------------------
 

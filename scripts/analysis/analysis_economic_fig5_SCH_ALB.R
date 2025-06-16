@@ -81,14 +81,14 @@ vlabels_indicators <-
   str_replace("crop_pest_potential", "Crop pest \npotential") %>% 
   str_replace("red_list_plants", "Red list \nplants") %>% 
   str_replace("pollination_potential", "Pollination \npotential") %>% 
-  str_replace("nestedness", "Nestedness") %>% 
-  str_replace("butterfly_richness", "Butterfly \nrichness") %>% 
-  str_replace("regional_distribution_butterflies", "Regional \ndistribution butterflies") %>% 
-  str_replace("\\btrophic_interactions\\b", "Trophic \ninteractions") %>% 
-  str_replace("regional_distribution_plants", "Regional \ndistribution plants") %>% 
+  str_replace("nestedness", " \nNestedness") %>% 
+  str_replace("butterfly_richness", "Butterfly richness") %>% 
+  str_replace("regional_distribution_butterflies", "Reg. dist. \nbutterflies") %>% 
+  str_replace("\\btrophic_interactions\\b", "Trophic ints.") %>% 
+  str_replace("regional_distribution_plants", "Reg. dist. \nplants") %>% 
   str_replace("red_list_butterflies", "Red list \nbutterflies") %>% 
   str_replace("plant_richness", "Plant \nrichness") %>% 
-  str_replace("unique_trophic_interactions", "Unique \ntrophic interactions")
+  str_replace("unique_trophic_interactions", "Unique \ntrophic ints.")
   
 
 ## ---- Radar chart with all 19 plots combined in one image
@@ -99,7 +99,7 @@ pdf(file = "output/plots/economic_modelling/ALB/radar_charts_scenarios/tradeoffs
     height = 4.5)
 
 # Prepare the screen 
-par(mar = c(1, 1, 3, 1))
+par(mar = c(0, 0, 2.5, 0))
 par(mfrow = c(2, 3))
 
 # Loop for each plot
@@ -128,8 +128,8 @@ for(i in 1:6) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
+    vlcex = 0.9, # font size
+    calcex = 0.6, # font size for caxislabels
     vlabels = vlabels_indicators,
     
     #title
@@ -197,13 +197,13 @@ vlabels_indicators <-
   str_replace("connectance", "Connectance") %>% 
   str_replace("crop_pest_potential", "Crop pest \npotential") %>% 
   str_replace("pollination_potential", "Pollination \npotential") %>% 
-  str_replace("nestedness", "Nestedness") %>% 
-  str_replace("butterfly_richness", "Butterfly \nrichness") %>% 
-  str_replace("regional_distribution_butterflies", "Regional \ndistribution butterflies") %>% 
-  str_replace("\\btrophic_interactions\\b", "Trophic \ninteractions") %>% 
-  str_replace("regional_distribution_plants", "Regional \ndistribution plants") %>% 
+  str_replace("nestedness", " \nNestedness") %>% 
+  str_replace("butterfly_richness", "Butterfly richness") %>% 
+  str_replace("regional_distribution_butterflies", "Reg. dist. \nbutterflies") %>% 
+  str_replace("\\btrophic_interactions\\b", "Trophic ints.") %>% 
+  str_replace("regional_distribution_plants", "Reg. dist. \nplants") %>% 
   str_replace("plant_richness", "Plant \nrichness") %>% 
-  str_replace("unique_trophic_interactions", "Unique \ntrophic interactions")
+  str_replace("unique_trophic_interactions", "Unique trophic ints.")
 
 
 ## ---- Radar chart with all 19 plots combined in one image
@@ -214,7 +214,7 @@ pdf(file = "output/plots/economic_modelling/SCH/radar_charts_scenarios/tradeoffs
     height = 4.5)
 
 # Prepare the screen 
-par(mar = c(1, 1, 3, 1))
+par(mar = c(0, 0, 2.5, 0))
 par(mfrow = c(2, 3))
 
 # Loop for each plot
@@ -243,8 +243,8 @@ for(i in 1:6) {
     cglwd = 0.6, # Line width for radar grids
     
     # custom labels
-    vlcex = 0.5, # font size
-    calcex = 0.5, # font size for caxislabels
+    vlcex = 0.9, # font size
+    calcex = 0.6, # font size for caxislabels
     vlabels = vlabels_indicators,
     
     #title

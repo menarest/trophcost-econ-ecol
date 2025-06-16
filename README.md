@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15108446.svg)](https://doi.org/10.5281/zenodo.15108446)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15108447.svg)](https://doi.org/10.5281/zenodo.15108447)
 
 Supplementary code for analyses of Menares, E., Markova-Nenova N., Sturm A., Wätzold F., Birkhofer K. (2025). Cost-effective conservation of multiple goals in grasslands: synergies and trade-offs. In submission.
 
